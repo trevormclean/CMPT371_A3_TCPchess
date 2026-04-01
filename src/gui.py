@@ -3,6 +3,7 @@ import sys
 import os
 import pygame
 from board import Board, Move, WHITE, BLACK, Pawn, Rook, Bishop, Knight, Queen, King
+from network import NetworkClient, dict_to_move, SERVER_TO_LOCAL_COLOR
 
 # constants __________________________________________________________________
 SQ = 80 # side length of a square
@@ -74,6 +75,12 @@ class ChessGUI:
     self.piece_imgs = self._load_piece_images()
 
     self.board = Board()
+    
+    # Create the client-side network connection and immediately connect to the server.
+    # This GUI will receive its assigned color (WHITE or BLACK) after connecting.
+    self.network = NetworkClient()
+    self.network.connect()
+    self.online = True
 
     # When networking is added, set this to WHITE or BLACK for each client.
     # None means both sides are played locally.
@@ -237,10 +244,13 @@ class ChessGUI:
       return
 
     if move is not None:
-      self.board.apply_move(move)
+      if self.online:
+        self.network.send_move(move)
+      else:
+        self.board.apply_move(move)
+        self.update_status()
       self.selected = None
       self.legal_moves = []
-      self.update_status()
       return
 
     # clicked on a square the selected piece can't move to
@@ -294,6 +304,42 @@ class ChessGUI:
       self.status = "Check"
     else:
       self.status = ""
+
+  def process_network_messages(self):
+    while True:
+      msg = self.network.poll_message()
+      if msg is None:
+        break
+
+      if msg["type"] == "WELCOME":
+        self.local_color = SERVER_TO_LOCAL_COLOR[msg["color"]]
+
+      elif msg["type"] == "STATE":
+        last = msg.get("last_move")
+        if last is not None:
+          move = dict_to_move(last)
+          self.board.apply_move(move)
+        self.update_status()
+
+      elif msg["type"] == "GAME_OVER":
+        status = msg["status"]
+        winner = msg.get("winner")
+        if status == "resign":
+          self.status = f"{winner.capitalize()} wins by resignation"
+        elif status == "disconnect":
+          self.status = f"{winner.capitalize()} wins by disconnect"
+        elif status == "checkmate":
+          self.status = f"Checkmate — {winner.capitalize()} wins"
+        elif status == "stalemate":
+          self.status = "Stalemate — draw"
+        self.surrendered = True
+
+      elif msg["type"] == "ERROR":
+        self.status = msg["message"]
+
+      elif msg["type"] == "DISCONNECT":
+        self.status = "Disconnected from server"
+        self.surrendered = True
 
   def new_game(self):
     """Resets the board and all GUI state"""
