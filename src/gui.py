@@ -355,15 +355,20 @@ class ChessGUI:
 
   def surrender(self):
     """Ends the game, awarding the win to the opponent"""
-    winner = "Black" if self.board.turn == WHITE else "White"
-    self.status = f"{winner} wins by resignation"
-    self.surrendered = True
+    if self.online:
+      self.network.send_resign()
+    else:
+      winner = "Black" if self.board.turn == WHITE else "White"
+      self.status = f"{winner} wins by resignation"
+      self.surrendered = True
 
   # Main loop ___________________________________________________________________
   def run(self):
     """Runs the main game loop"""
     clock = pygame.time.Clock()
     while True:
+      self.process_network_messages()
+      
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
           pygame.quit()
