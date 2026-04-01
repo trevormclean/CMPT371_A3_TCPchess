@@ -278,8 +278,11 @@ class ChessGUI:
       if m.promotion == chosen:
         move = m
     self.promo_pending = None
-    self.board.apply_move(move)
-    self.update_status()
+    if self.online:
+      self.network.send_move(move)
+    else:
+      self.board.apply_move(move)
+      self.update_status()
 
   def select(self, row: int, col: int):
     """Tries to select the piece at (row, col)"""
