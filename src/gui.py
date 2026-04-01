@@ -214,7 +214,9 @@ class ChessGUI:
 
   # Input handling _______________________________________________________________
   def board_click(self, x: int, y: int):
-    """Handle a click on the board"""
+    # In online mode, do not apply the move locally right away.
+    # Send it to the server first; the server will validate it and broadcast
+    # the accepted move back to both clients.
     row, col = self.px_to_sq(x, y)
     if not (0 <= row < 8 and 0 <= col < 8):
       return
@@ -309,15 +311,23 @@ class ChessGUI:
       self.status = ""
 
   def process_network_messages(self):
+    """Drain and handle any pending network messages.
+
+    Called once per frame from the main loop; processes all queued messages so
+    the UI/board state stays in sync with the server.
+    """
     while True:
+      # Poll until the network queue is empty (non-blocking).
       msg = self.network.poll_message()
       if msg is None:
         break
 
       if msg["type"] == "WELCOME":
+        # Server assigns our side (white/black) when we connect.
         self.local_color = SERVER_TO_LOCAL_COLOR[msg["color"]]
 
       elif msg["type"] == "STATE":
+        # Full/partial state update; apply the last move if provided.
         last = msg.get("last_move")
         if last is not None:
           move = dict_to_move(last)
@@ -325,6 +335,7 @@ class ChessGUI:
         self.update_status()
 
       elif msg["type"] == "GAME_OVER":
+        # Terminal game state (resign, disconnect, checkmate, stalemate).
         status = msg["status"]
         winner = msg.get("winner")
         if status == "resign":
@@ -338,9 +349,11 @@ class ChessGUI:
         self.surrendered = True
 
       elif msg["type"] == "ERROR":
+        # Display server-side validation/connection errors in the status bar.
         self.status = msg["message"]
 
       elif msg["type"] == "DISCONNECT":
+        # Connection dropped unexpectedly; freeze the game.
         self.status = "Disconnected from server"
         self.surrendered = True
 
@@ -355,6 +368,8 @@ class ChessGUI:
 
   def surrender(self):
     """Ends the game, awarding the win to the opponent"""
+    # In online mode, the server must be told about the resignation so it 
+    # can notify both players and officially end the game.
     if self.online:
       self.network.send_resign()
     else:
@@ -367,6 +382,9 @@ class ChessGUI:
     """Runs the main game loop"""
     clock = pygame.time.Clock()
     while True:
+      # Process any pending messages from the server before handling user input.
+      # This keeps the GUI updated with opponent moves and game-over messages.
+
       self.process_network_messages()
       
       for event in pygame.event.get():
