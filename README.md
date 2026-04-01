@@ -1,4 +1,4 @@
-# **CMPT 371 A3 Socket Programming `Tic-Tac-Toe`**
+# **CMPT 371 A3 Socket Programming `OnlineChess`**
 
 **Course:** CMPT 371 \- Data Communications & Networking  
 **Instructor:** Mirza Zaeem Baig  
