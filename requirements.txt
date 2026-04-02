@@ -1,2 +1,2 @@
 # Project dependencies
-pygame>=2.5.0
+pygame==2.5.2
