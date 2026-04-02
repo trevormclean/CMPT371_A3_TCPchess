@@ -1,4 +1,4 @@
-# **CMPT 371 A3 Socket Programming `Tic-Tac-Toe`**
+# **CMPT 371 A3 Socket Programming `OnlineChess`**
 
 **Course:** CMPT 371 \- Data Communications & Networking  
 **Instructor:** Mirza Zaeem Baig  
@@ -9,24 +9,37 @@
 
 | Name | Student ID | Email |
 | :---- | :---- | :---- |
-| Jane Doe | 301111111 | jane.doe@university.edu |
+| Angad Hundal | 301590384 | ash32@sfu.ca |
 | John Smith | 301222222 | john.smith@university.edu |
 
 ## **1\. Project Overview & Description**
 
-This project is a multiplayer Tic-Tac-Toe game built using Python's Socket API (TCP). It allows two distinct clients to connect to a central server, be matched into a game lobby, and play against each other in real-time. The server handles the game logic, board state validation, and win-condition checking, ensuring that clients cannot cheat by modifying their local game state.
+This project is a multiplayer Chess game built using Python's Socket API (TCP) and a `pygame` graphical user interface. It allows two clients to connect to a central server and play against each other in real time.
+
+The server acts as the authoritative source of truth for the match. It validates all incoming moves using the shared chess logic, applies only legal moves, and broadcasts approved updates back to both clients. This helps keep both players synchronized and prevents clients from making unauthorized or illegal moves. The project supports standard chess rules including promotion, castling, en passant, check, checkmate, and stalemate.
 
 ## **2\. System Limitations & Edge Cases**
 
-As required by the project specifications, we have identified and handled (or defined) the following limitations and potential issues within our application scope:
+As required by the project specifications, we identified and handled (or explicitly defined) the following limitations and edge cases within our application scope:
 
-* **Handling Multiple Clients Concurrently:** 
-  * <span style="color: green;">*Solution:*</span> We utilized Python's threading module. When two clients connect, they are popped from the matchmaking\_queue and assigned to an isolated game\_session daemon thread. This ensures concurrent games do not block the main server event listener.  
-  * <span style="color: red;">*Limitation:*</span> Thread creation is limited by system resources. An enterprise application would eventually need a thread pool or asynchronous I/O (like asyncio) to handle tens of thousands of connections.  
-* **TCP Stream Buffering:** 
-  * <span style="color: green;">*Solution:*</span> TCP is a continuous byte stream, meaning multiple JSON messages can be mashed together if sent rapidly. We implemented an application-layer fix by appending a newline \\n to all JSON payloads and splitting the buffer on the client/server side to process them atomically.  
-* **Input Validation & Security:** 
-  * <span style="color: red;">*Limitation:*</span> The client side uses a basic try/except ValueError to prevent crashes from bad user input (like typing letters instead of numbers). However, malicious users could still theoretically modify the client script to send invalid coordinates. Our server assumes well-formatted JSON integers in this basic implementation.
+* **Handling Two Networked Players:**  
+  * <span style="color: green;">*Solution:*</span> The server accepts TCP connections, stores incoming clients in a matchmaking queue, and starts a dedicated game session thread once two players are available. This allows each match to run independently without blocking the main server listener.  
+  * <span style="color: red;">*Limitation:*</span> Our design is intended for lightweight class-project use. While multiple sessions are possible, the threading model is not optimized for large-scale deployment.
+
+* **TCP Stream Buffering:**  
+  * <span style="color: green;">*Solution:*</span> Because TCP is a byte stream rather than a message-based protocol, our application uses newline-delimited JSON. Each message is sent as one JSON object followed by `\n`, and incoming data is split on that delimiter before parsing.
+
+* **Server-Side Move Validation:**  
+  * <span style="color: green;">*Solution:*</span> The server validates each incoming move against the authoritative board state before applying it. Illegal moves are rejected and an error message is sent back to the client. This follows a single-source-of-truth design similar to a real multiplayer game server.
+
+* **Client Synchronization:**  
+  * <span style="color: red;">*Limitation:*</span> The server currently broadcasts the latest approved move and game status rather than a full serialized board snapshot every turn. This is sufficient if both clients remain synchronized, but it is less robust than transmitting the full board state each update.
+
+* **New Game / Rematch Support:**  
+  * <span style="color: red;">*Limitation:*</span> The original GUI includes a local "New Game" button, but in the networked version a full rematch protocol was not implemented on the server. As a result, restarting a game online is not fully supported unless both clients and the server are reset.
+
+* **Disconnect Handling:**  
+  * <span style="color: green;">*Solution:*</span> If one player disconnects during their turn, the server ends the session and awards the win to the other player.
 
 ## **3\. Video Demo**
 
@@ -38,72 +51,119 @@ Our 2-minute video demonstration covering connection establishment, data exchang
 
 To run this project, you need:
 
-* **Python 3.10** or higher.  
-* No external pip installations are required (uses standard socket, threading, json, sys libraries).  
-* (Optional) VS Code or Terminal.
+* **Python 3.10** or higher  
+* **pygame** installed  
+* The provided chess piece image assets in an `img/` folder next to `gui.py`
 
-<span style="color: purple;">***RUBRIC NOTE: No external libraries are required. Therefore, a requirements.txt file is not strictly necessary for dependency installation, though one might be included for environment completeness.***</span>
+Install `pygame` with:
 
-## **4\. Step-by-Step Run Guide**
+```bash
+pip install pygame
+```
+
+## **5\. Step-by-Step Run Guide**
 
 <span style="color: purple;">***RUBRIC NOTE: The grader must be able to copy-paste these commands.***</span>
 
 
 ### **Step 1: Start the Server**
-
-Open your terminal and navigate to the project folder. The server binds to 127.0.0.1 on port 5050\.  
+Open your terminal and navigate to the project root folder. The server binds to `127.0.0.1` on port `5050`.
 ```bash
-python server.py  
-# Console output: "[STARTING] Server is listening on 127.0.0.1:5050"
+python src/server.py
+# Console output: "[STARTING] Chess server listening on 127.0.0.1:5050"
 ```
-
-### **Step 2: Connect Player 1 (X)**
-
-Open a **new** terminal window (keep the server running). Run the client script to start the first client.  
+ 
+### **Step 2: Connect Player 1**
+Open a **new** terminal window (keep the server running). Launch the GUI client for the first player.
 ```bash
-python client.py  
-# Console output: "Connected. Waiting for opponent..."
+python src/gui.py
+# A pygame window will open for Player 1.
 ```
-
-### **Step 3: Connect Player 2 (O)**
-
-Open a **third** terminal window. Run the client script again to start the second client.  
+ 
+### **Step 3: Connect Player 2**
+Open a **third** terminal window. Launch the GUI client again for the second player.
 ```bash
-python client.py  
-# Console output: "Connected. Waiting for opponent..."
-# Console output: "Match found! You are Player O."
+python src/gui.py
+# A second pygame window will open for Player 2.
 ```
-
+Once both clients connect, the server terminal will show:
+```
+[QUEUE] Player added from ('127.0.0.1', PORT). Queue size: 1
+[QUEUE] Player added from ('127.0.0.1', PORT). Queue size: 2
+[MATCH] 2 players found. Starting chess session.
+```
+ 
 ### **Step 4: Gameplay**
+1. The server assigns one client **White** and the other **Black**.
+2. **White moves first** — click a piece, then click its destination square.
+3. The client sends the move to the server, which validates it against the authoritative board state.
+4. If legal, the server applies the move and broadcasts it to both clients, keeping both boards in sync.
+5. The game continues until it ends by **checkmate**, **stalemate**, **resignation**, or **disconnect**.
+ 
+### **Step 5: Closing the Program**
+To stop the server, return to the server terminal and press `Ctrl + C`.
+```bash
+^C
+# Shuts down the chess server
+```
+> **Note:** Closing a client window during an active match is treated as a disconnect and will end the game.
 
-1. **Player X** will be prompted: Enter row and col (e.g., '1 1'):.  
-2. Type two numbers separated by a space (from 0 to 2\) and press Enter.  
-3. The server updates the board on both screens.  
-4. **Player O** takes their turn.  
-5. The connection naturally terminates when a win/draw is achieved.
-
-## **5\. Technical Protocol Details (JSON over TCP)**
-
-We designed a custom application-layer protocol for data exchange usin JSON over TCP:
-
-* **Message Format:** `{"type": <string>, "payload": <data>}`  
-* **Handshake Phase:** \* Client sends: `{"type": "CONNECT"}`  
-  * Server responds: `{"type": "WELCOME", "payload": "Player X"}`  
-* **Gameplay Phase:**  
-  * Client sends: `{"type": "MOVE", "row": 1, "col": 1}`  
-  * Server broadcasts: `{"type": "UPDATE", "board": [[...], [...], [...]], , "turn": "O", "status": "ongoing"}`
-
-
-## **6\. Academic Integrity & References**
-
-<span style="color: purple;">***RUBRIC NOTE: List all references used and help you got. Below is an example.***</span>
-
-* **Code Origin:**  
-  * The socket boilerplate was adapted from the course tutorial "TCP Echo Server". The core multithreaded game logic, protocol, and state management were written by the group.  
-* **GenAI Usage:**  
-  * ChatGPT was used to assist in generating the Unicode box-drawing characters for the CLI interface, and to help structure the TCP buffer-splitting logic (`\n delimiter`).  
-  * Gemini was used to help in `README.md` writing and polishing.  
-  * GitHub Copilot was used to help plan the workflow of the application.   
-* **References:**  
-  * [Python Socket Programming HOWTO](https://docs.python.org/3/howto/sockets.html)  
-  * [Real Python: Intro to Python Threading](https://realpython.com/intro-to-python-threading/)
+## 6\. Technical Protocol Details (JSON over TCP)
+ 
+We designed a custom application-layer protocol using newline-delimited JSON over TCP.
+ 
+### **Handshake Phase**
+ 
+Client sends:
+```json
+{"type": "CONNECT"}
+```
+Server responds:
+```json
+{"type": "WELCOME", "color": "white"}
+```
+or
+```json
+{"type": "WELCOME", "color": "black"}
+```
+ 
+### **Gameplay Phase**
+ 
+Client sends a move request:
+```json
+{"type": "MOVE", "move": {"start": [1, 4], "end": [3, 4], "promotion": null, "en_passant": false, "kside_castle": false, "qside_castle": false}}
+```
+Server broadcasts updated state:
+```json
+{"type": "STATE", "turn": "black", "status": "ongoing", "winner": null, "last_move": {"start": [1, 4], "end": [3, 4], "promotion": null, "en_passant": false, "kside_castle": false, "qside_castle": false}}
+```
+ 
+### **Other Messages**
+ 
+Resignation:
+```json
+{"type": "RESIGN"}
+```
+Illegal move / invalid request:
+```json
+{"type": "ERROR", "message": "Illegal move"}
+```
+Game over:
+```json
+{"type": "GAME_OVER", "status": "checkmate", "winner": "white"}
+```
+ 
+---
+ 
+## 7\. **Academic Integrity & References**
+ 
+### **Code Origin**
+- The chess board logic and GUI were developed as part of the group project.
+- The socket/server-client structure was inspired by the course socket programming examples and adapted to support a multiplayer chess game.
+ 
+### **GenAI Usage**
+- ChatGPT was used to help explain networking design decisions, organize message formats, and refine documentation/comments.
+ 
+### **References**
+- [CMPT371_A3_Socket_Programming by Miriam Bebawy](https://github.com/mariam-bebawy/CMPT371_A3_Socket_Programming)
+ 
