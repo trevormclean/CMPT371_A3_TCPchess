@@ -1,6 +1,7 @@
 import socket
 import threading
 import json
+import select
 
 from board import Board, Move, WHITE, BLACK, Queen, Rook, Bishop, Knight
 
@@ -26,23 +27,33 @@ CODE_TO_PROMO = {
 }
 
 
-def send_json(conn: socket.socket, msg: dict):
-    """Send one newline-delimited JSON message to a client."""
-    # Protocol: one JSON object per line (newline-delimited JSON).
+def send_json(conn: socket.socket, msg: dict) -> bool:
+    """Send one newline-delimited JSON message to a client.
+
+    Returns False if the socket is closed/reset.
+    """
     data = json.dumps(msg) + "\n"
-    conn.sendall(data.encode("utf-8"))
+    try:
+        conn.sendall(data.encode("utf-8"))
+        return True
+    except (ConnectionResetError, OSError):
+        return False
 
 
 def recv_json(conn: socket.socket, buffer: str) -> tuple[dict | None, str]:
     """Receive a single newline-delimited JSON message.
 
-    Returns (message, updated_buffer). Message is None on disconnect.
+    Returns (message, updated_buffer). Message is None on disconnect/reset.
     """
-    # Accumulate bytes until we have a full line to parse.
     while "\n" not in buffer:
-        data = conn.recv(4096)
+        try:
+            data = conn.recv(4096)
+        except (ConnectionResetError, OSError):
+            return None, buffer
+
         if not data:
             return None, buffer
+
         buffer += data.decode("utf-8")
 
     line, buffer = buffer.split("\n", 1)
@@ -107,7 +118,7 @@ def game_status(board: Board) -> tuple[str, str | None]:
     return "ongoing", None
 
 
-def broadcast_state(conn_white: socket.socket, conn_black: socket.socket, board: Board, last_move: Move | None = None):
+def broadcast_state(conn_white: socket.socket, conn_black: socket.socket, board: Board, last_move: Move | None = None) -> bool:
     """Send the current board status to both clients."""
     status, winner = game_status(board)
     msg = {
@@ -117,78 +128,138 @@ def broadcast_state(conn_white: socket.socket, conn_black: socket.socket, board:
         "winner": winner,
         "last_move": move_to_dict(last_move) if last_move else None,
     }
-    send_json(conn_white, msg)
-    send_json(conn_black, msg)
+    ok1 = send_json(conn_white, msg)
+    ok2 = send_json(conn_black, msg)
+    return ok1 and ok2
 
 
 def game_session(conn_white: socket.socket, conn_black: socket.socket):
-    """Run a single two-player game session.
-
-    Expects clients to send newline-delimited JSON messages of type MOVE/RESIGN.
-    """
+    """Run a single two-player chess session with rematch support."""
     board = Board()
+    game_finished = False
 
-    send_json(conn_white, {"type": "WELCOME", "color": "white"})
-    send_json(conn_black, {"type": "WELCOME", "color": "black"})
-    broadcast_state(conn_white, conn_black, board)
+    if not send_json(conn_white, {"type": "WELCOME", "color": "white"}):
+        return
+    if not send_json(conn_black, {"type": "WELCOME", "color": "black"}):
+        return
+    if not broadcast_state(conn_white, conn_black, board):
+        return
 
-    sockets = {
-        WHITE: conn_white,
-        BLACK: conn_black,
-    }
-    other = {
-        WHITE: conn_black,
-        BLACK: conn_white,
-    }
     buffers = {
-        WHITE: "",
-        BLACK: "",
+        conn_white: "",
+        conn_black: "",
+    }
+    colors = {
+        conn_white: WHITE,
+        conn_black: BLACK,
     }
 
     try:
         while True:
-            active_color = board.turn
-            conn = sockets[active_color]
+            readable, _, _ = select.select([conn_white, conn_black], [], [])
 
-            msg, buffers[active_color] = recv_json(conn, buffers[active_color])
-            if msg is None:
-                # Active player disconnected; award win to the other player.
-                winner = "black" if active_color == WHITE else "white"
-                send_json(other[active_color], {
-                    "type": "GAME_OVER",
-                    "status": "disconnect",
-                    "winner": winner,
-                })
-                break
+            for conn in readable:
+                msg, buffers[conn] = recv_json(conn, buffers[conn])
+                color = colors[conn]
+                other_conn = conn_black if conn is conn_white else conn_white
 
-            if msg["type"] == "RESIGN":
-                # Active player resigned; notify both clients.
-                winner = "black" if active_color == WHITE else "white"
-                send_json(conn_white, {"type": "GAME_OVER", "status": "resign", "winner": winner})
-                send_json(conn_black, {"type": "GAME_OVER", "status": "resign", "winner": winner})
-                break
+                if msg is None:
+                    # Only send a disconnect result if the game was still active.
+                    if not game_finished:
+                        winner = "black" if color == WHITE else "white"
+                        send_json(other_conn, {
+                            "type": "GAME_OVER",
+                            "status": "disconnect",
+                            "winner": winner,
+                        })
+                    return
 
-            if msg["type"] != "MOVE":
-                # Any other message types are rejected.
-                send_json(conn, {"type": "ERROR", "message": "Unknown message type"})
-                continue
+                msg_type = msg.get("type")
 
-            move = dict_to_move(msg["move"])
+                if msg_type == "NEW_GAME":
+                    if not game_finished:
+                        send_json(conn, {
+                            "type": "ERROR",
+                            "message": "Game is still in progress",
+                        })
+                        continue
 
-            if not move_is_legal(board, move):
-                # Server is authoritative: reject illegal client moves.
-                send_json(conn, {"type": "ERROR", "message": "Illegal move"})
-                continue
+                    board = Board()
+                    game_finished = False
+                    send_json(conn_white, {"type": "RESET"})
+                    send_json(conn_black, {"type": "RESET"})
+                    broadcast_state(conn_white, conn_black, board)
+                    continue
 
-            board.apply_move(move)
-            broadcast_state(conn_white, conn_black, board, last_move=move)
+                if msg_type == "RESIGN":
+                    if game_finished:
+                        send_json(conn, {
+                            "type": "ERROR",
+                            "message": "Game is already over",
+                        })
+                        continue
 
-            status, winner = game_status(board)
-            if status in ("checkmate", "stalemate"):
-                # Terminal state reached; inform both players.
-                send_json(conn_white, {"type": "GAME_OVER", "status": status, "winner": winner})
-                send_json(conn_black, {"type": "GAME_OVER", "status": status, "winner": winner})
-                break
+                    winner = "black" if color == WHITE else "white"
+                    send_json(conn_white, {
+                        "type": "GAME_OVER",
+                        "status": "resign",
+                        "winner": winner,
+                    })
+                    send_json(conn_black, {
+                        "type": "GAME_OVER",
+                        "status": "resign",
+                        "winner": winner,
+                    })
+                    game_finished = True
+                    continue
+
+                if msg_type != "MOVE":
+                    send_json(conn, {
+                        "type": "ERROR",
+                        "message": "Unknown message type",
+                    })
+                    continue
+
+                if game_finished:
+                    send_json(conn, {
+                        "type": "ERROR",
+                        "message": "Game is over. Start a new game.",
+                    })
+                    continue
+
+                if color != board.turn:
+                    send_json(conn, {
+                        "type": "ERROR",
+                        "message": "Not your turn",
+                    })
+                    continue
+
+                move = dict_to_move(msg["move"])
+
+                if not move_is_legal(board, move):
+                    send_json(conn, {
+                        "type": "ERROR",
+                        "message": "Illegal move",
+                    })
+                    continue
+
+                board.apply_move(move)
+                if not broadcast_state(conn_white, conn_black, board, last_move=move):
+                    return
+
+                status, winner = game_status(board)
+                if status in ("checkmate", "stalemate"):
+                    send_json(conn_white, {
+                        "type": "GAME_OVER",
+                        "status": status,
+                        "winner": winner,
+                    })
+                    send_json(conn_black, {
+                        "type": "GAME_OVER",
+                        "status": status,
+                        "winner": winner,
+                    })
+                    game_finished = True
 
     finally:
         conn_white.close()

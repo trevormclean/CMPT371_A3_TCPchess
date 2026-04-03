@@ -86,6 +86,7 @@ class ChessGUI:
     # None means both sides are played locally.
     self.local_color: str | None = None
     self.surrendered: bool = False
+    self.game_finished: bool = False
 
     self.selected: tuple[int, int] | None = None # square of the selected piece
     self.legal_moves: list[Move] = [] # legal moves for the selected piece
@@ -311,33 +312,37 @@ class ChessGUI:
       self.status = ""
 
   def process_network_messages(self):
-    """Drain and handle any pending network messages.
-
-    Called once per frame from the main loop; processes all queued messages so
-    the UI/board state stays in sync with the server.
-    """
     while True:
-      # Poll until the network queue is empty (non-blocking).
       msg = self.network.poll_message()
       if msg is None:
         break
 
       if msg["type"] == "WELCOME":
-        # Server assigns our side (white/black) when we connect.
         self.local_color = SERVER_TO_LOCAL_COLOR[msg["color"]]
 
+      elif msg["type"] == "RESET":
+        self.reset_local_game()
+
       elif msg["type"] == "STATE":
-        # Full/partial state update; apply the last move if provided.
         last = msg.get("last_move")
         if last is not None:
           move = dict_to_move(last)
           self.board.apply_move(move)
-        self.update_status()
+
+        # Clear old selection/highlights after a server-approved move.
+        self.selected = None
+        self.legal_moves = []
+        self.promo_pending = None
+
+        # Only auto-update from board state if we have not already shown
+        # a final GAME_OVER message.
+        if not self.game_finished:
+          self.update_status()
 
       elif msg["type"] == "GAME_OVER":
-        # Terminal game state (resign, disconnect, checkmate, stalemate).
         status = msg["status"]
         winner = msg.get("winner")
+
         if status == "resign":
           self.status = f"{winner.capitalize()} wins by resignation"
         elif status == "disconnect":
@@ -346,36 +351,46 @@ class ChessGUI:
           self.status = f"Checkmate — {winner.capitalize()} wins"
         elif status == "stalemate":
           self.status = "Stalemate — draw"
+
         self.surrendered = True
+        self.game_finished = True
 
       elif msg["type"] == "ERROR":
-        # Display server-side validation/connection errors in the status bar.
         self.status = msg["message"]
 
       elif msg["type"] == "DISCONNECT":
-        # Connection dropped unexpectedly; freeze the game.
-        self.status = "Disconnected from server"
-        self.surrendered = True
+        # Do not overwrite a real game result with "Disconnected".
+        if not self.game_finished:
+          self.status = "Disconnected from server"
+          self.surrendered = True
+          self.game_finished = True
 
   def new_game(self):
-    """Resets the board and all GUI state"""
+    """Start a new game locally, or request one from the server."""
+    if self.online:
+      self.network.send_new_game()
+    else:
+      self.reset_local_game()
+
+  def reset_local_game(self):
+    """Reset the local board/UI state without sending any network message."""
     self.board = Board()
     self.selected = None
     self.legal_moves = []
     self.promo_pending = None
     self.status = ""
     self.surrendered = False
+    self.game_finished = False
 
   def surrender(self):
-    """Ends the game, awarding the win to the opponent"""
-    # In online mode, the server must be told about the resignation so it 
-    # can notify both players and officially end the game.
+    """Ends the game, awarding the win to the opponent."""
     if self.online:
       self.network.send_resign()
     else:
       winner = "Black" if self.board.turn == WHITE else "White"
       self.status = f"{winner} wins by resignation"
       self.surrendered = True
+      self.game_finished = True
 
   # Main loop ___________________________________________________________________
   def run(self):
@@ -389,6 +404,8 @@ class ChessGUI:
       
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
+          if self.online:
+            self.network.close()
           pygame.quit()
           sys.exit()
 

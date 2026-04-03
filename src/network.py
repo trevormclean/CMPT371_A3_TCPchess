@@ -110,6 +110,10 @@ class NetworkClient:
         """Notify the server that this player resigns."""
         self._send_json({"type": "RESIGN"})
 
+    def send_new_game(self):
+        """Request a new game from the server."""
+        self._send_json({"type": "NEW_GAME"})
+
     def poll_message(self) -> dict | None:
         """Non-blocking read of the next received message (or None)."""
         try:

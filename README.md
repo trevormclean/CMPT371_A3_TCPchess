@@ -3,7 +3,7 @@
 **Course:** CMPT 371 \- Data Communications & Networking  
 **Instructor:** Mirza Zaeem Baig  
 **Semester:** Spring 2026  
-<span style="color: purple;">***RUBRIC NOTE: As per submission guidelines, only one group member will submit the link to this repository on Canvas.***
+<span style="color: purple;">***RUBRIC NOTE: As per submission guidelines, only one group member will submit the link to this repository on Canvas.***</span>
 
 ## **Group Members**
 
@@ -35,11 +35,11 @@ As required by the project specifications, we identified and handled (or explici
 * **Client Synchronization:**  
   * <span style="color: red;">*Limitation:*</span> The server currently broadcasts the latest approved move and game status rather than a full serialized board snapshot every turn. This is sufficient if both clients remain synchronized, but it is less robust than transmitting the full board state each update.
 
-* **New Game / Rematch Support:**  
-  * <span style="color: red;">*Limitation:*</span> The original GUI includes a local "New Game" button, but in the networked version a full rematch protocol was not implemented on the server. As a result, restarting a game online is not fully supported unless both clients and the server are reset.
+* **New Game / Rematch Handling:**  
+  * <span style="color: green;">*Solution:*</span> After a game ends, either player may request a new game. The server resets the authoritative board state and sends a reset message so both clients start a fresh match in sync.
 
 * **Disconnect Handling:**  
-  * <span style="color: green;">*Solution:*</span> If one player disconnects during their turn, the server ends the session and awards the win to the other player.
+  * <span style="color: green;">*Solution:*</span> If one player disconnects during an active match, the server ends the game and awards the win to the other player.
 
 ## **3\. Video Demo**
 
@@ -53,7 +53,7 @@ To run this project, you need:
 
 * **Python 3.10** or higher  
 * **pygame** installed  
-* The provided chess piece image assets in an `img/` folder inside `src/`
+* The provided chess piece image assets in `src/img/`
 
 Install `pygame` with:
 
@@ -98,7 +98,8 @@ Once both clients connect, the server terminal will show:
 2. **White moves first** — click a piece, then click its destination square.
 3. The client sends the move to the server, which validates it against the authoritative board state.
 4. If legal, the server applies the move and broadcasts it to both clients, keeping both boards in sync.
-5. The game continues until it ends by **checkmate**, **stalemate**, **resignation**, or **disconnect**.
+5. The game continues until it ends by **checkmate**, **stalemate**, **resignation**, or **disconnect**. A player may also resign at any time, and the server notifies both clients of the result.
+6. After a game ends, players may use the **New Game** button to start a fresh match without restarting the server.
  
 ### **Step 5: Closing the Program**
 To stop the server, return to the server terminal and press `Ctrl + C`.
@@ -143,6 +144,16 @@ Server broadcasts updated state:
 Resignation:
 ```json
 {"type": "RESIGN"}
+```
+
+New game request:
+```json
+{"type": "NEW_GAME"}
+```
+
+Server reset message:
+```json
+{"type": "RESET"}
 ```
 Illegal move / invalid request:
 ```json
