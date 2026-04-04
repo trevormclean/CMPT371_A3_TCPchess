@@ -45,7 +45,7 @@ As required by the project specifications, we identified and handled (or explici
 
 <span style="color: purple;">***RUBRIC NOTE: Include a clickable link.***</span>  
 Our 2-minute video demonstration covering connection establishment, data exchange, real-time gameplay, and process termination can be viewed below:  
-[**▶️ Watch Project Demo on YouTube**](https://www.youtube.com/watch?v=dQw4w9WgXcQ)
+[**▶️ Watch Project Demo on YouTube**](https://www.youtube.com/watch?v=rvZqf5fBzdQ)
 
 ## **4\. Prerequisites (Fresh Environment)**
 
