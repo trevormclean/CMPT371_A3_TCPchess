@@ -41,6 +41,9 @@ As required by the project specifications, we identified and handled (or explici
 * **Disconnect Handling:**  
   * <span style="color: green;">*Solution:*</span> If one player disconnects during an active match, the server ends the game and awards the win to the other player.
 
+* **Niche Chess Rules:**  
+  * <span style="color: red;">*Limitation:*</span> Three-fold repitition, the 50-move rule, and insufficient material draw were not implemented since they are very rare and non-trivial to code.
+
 ## **3\. Video Demo**
 
 <span style="color: purple;">***RUBRIC NOTE: Include a clickable link.***</span>  
